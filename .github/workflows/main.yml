@@ -9,14 +9,14 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [14, 20]
+        node-version: [18]
         
     env:
       STACK_NAME: screening-plus-angular
       BUCKET_NAME: screening-plus-angular-demo-7206
       CFN_TEMPLATE: cfn/aws-cft.yaml
-      CNAME_ALIASES: screeningplusdemo.com,www.screeningplusdemo.com
-      ACM_CERT_ARN: arn:aws:acm:us-east-1:940146811379:certificate/a9111815-780d-4522-85f1-c1ecdd52238f
+      #CNAME_ALIASES: screeningplusdemo.com,www.screeningplusdemo.com
+      #ACM_CERT_ARN: arn:aws:acm:us-east-1:940146811379:certificate/a9111815-780d-4522-85f1-c1ecdd52238f
 
     steps:
       - name: Checkout repository
@@ -53,13 +53,13 @@ jobs:
           node-version: ${{ matrix.node-version }}
 
       - name: Install Angular dependencies
-        run: npm ci
+        run: npm install
 
       - name: Install Angular CLI globally
         run: npm install -g @angular/cli
         
       - name: Build Angular app
-        run:  ng build
+        run:  npm run build -- --configuration production
 
       - name: Sync build to S3
         run: |
