@@ -7,8 +7,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      BUCKET_NAME: my-angular-frontend-bucket
+      AWS_REGION: us-east-1
       STACK_NAME: angular-frontend-stack
+      BUCKET_NAME: my-angular-frontend-unique-2025
+      CFN_TEMPLATE: cfn/aws-cft.yaml
 
     steps:
       - name: Checkout code
@@ -21,18 +23,35 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Deploy CloudFormation stack (create S3 + CF if not exists)
+      - name: Check if CloudFormation stack exists
+        id: stack-check
         run: |
+          STACK_EXISTS=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].StackName" --output text 2>/dev/null || echo "NO")
+          echo "stack_exists=$STACK_EXISTS" >> $GITHUB_OUTPUT
+
+      - name: Create CloudFormation stack if not exists
+        if: steps.stack-check.outputs.stack_exists == 'NO'
+        run: |
+          echo "Creating CloudFormation stack..."
           aws cloudformation deploy \
             --stack-name $STACK_NAME \
-            --template-file cfn/aws-cft.yaml \
+            --template-file $CFN_TEMPLATE \
             --capabilities CAPABILITY_NAMED_IAM \
             --parameter-overrides BucketName=$BUCKET_NAME
+
+      - name: Retrieve CloudFront Distribution ID
+        id: cf-id
+        run: |
+          CF_ID=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendCloudFrontId'].OutputValue" \
+            --output text)
+          echo "cf_id=$CF_ID" >> $GITHUB_OUTPUT
 
       - name: Install Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 18
+          node-version: 20
 
       - name: Install Angular dependencies
         run: npm ci
@@ -42,15 +61,13 @@ jobs:
 
       - name: Sync build to S3
         run: |
-          aws s3 sync ./dist/your-angular-app-name s3://$BUCKET_NAME/ --delete
+          DIST_FOLDER=$(ls dist/)
+          echo "Syncing ./dist/$DIST_FOLDER to s3://$BUCKET_NAME"
+          aws s3 sync ./dist/$DIST_FOLDER s3://$BUCKET_NAME/ --delete
 
       - name: Invalidate CloudFront cache
         run: |
-          DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
-            --stack-name $STACK_NAME \
-            --query "Stacks[0].Outputs[?OutputKey=='FrontendCloudFront'].OutputValue" \
-            --output text)
+          echo "Invalidating CloudFront cache..."
           aws cloudfront create-invalidation \
-            --distribution-id $DISTRIBUTION_ID \
+            --distribution-id ${{ steps.cf-id.outputs.cf_id }} \
             --paths "/*"
-
