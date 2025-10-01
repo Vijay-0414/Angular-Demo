@@ -1,16 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: S3 Static Website Hosting with CloudFront (Angular App)
+Description: Minimal S3 Bucket + CloudFront Distribution for Angular App
 
 Parameters:
   BucketName:
-    Description: Enter the name of the S3 bucket (must be globally unique)
-    Type: String
-  CNAMEAliases:
-    Description: Comma-separated list of CNAMEs for the CloudFront distribution
-    Type: CommaDelimitedList
-    Default: ""
-  ACMCertificateArn:
-    Description: ARN of the ACM certificate in us-east-1 region
+    Description: Globally unique S3 bucket name
     Type: String
 
 Resources:
@@ -39,9 +32,9 @@ Resources:
         Statement:
           - Sid: PublicReadGetObject
             Effect: Allow
-            Principal: '*'
+            Principal: "*"
             Action: s3:GetObject
-            Resource: !Sub arn:aws:s3:::${StaticWebsiteBucket}/*
+            Resource: !Sub "arn:aws:s3:::${StaticWebsiteBucket}/*"
 
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
@@ -50,10 +43,9 @@ Resources:
         Enabled: true
         DefaultRootObject: index.html
         Origins:
-          - DomainName: !GetAtt StaticWebsiteBucket.RegionalDomainName
-            Id: S3Origin
-            S3OriginConfig:
-              OriginAccessIdentity: ""
+          - Id: S3Origin
+            DomainName: !GetAtt StaticWebsiteBucket.RegionalDomainName
+            S3OriginConfig: {}
         DefaultCacheBehavior:
           TargetOriginId: S3Origin
           ViewerProtocolPolicy: redirect-to-https
@@ -68,30 +60,17 @@ Resources:
             Cookies:
               Forward: none
           Compress: true
-        ViewerCertificate:
-          AcmCertificateArn: !Ref ACMCertificateArn
-          SslSupportMethod: sni-only
-          MinimumProtocolVersion: TLSv1.2_2021
         PriceClass: PriceClass_100
-        Aliases: !Ref CNAMEAliases
-        CustomErrorResponses:
-          - ErrorCode: 403
-            ResponsePagePath: /index.html
-            ResponseCode: 200
-            ErrorCachingMinTTL: 0
-          - ErrorCode: 404
-            ResponsePagePath: /index.html
-            ResponseCode: 200
-            ErrorCachingMinTTL: 0
 
 Outputs:
-  CloudFrontURL:
-    Description: The CloudFront distribution URL
-    Value: !GetAtt CloudFrontDistribution.DomainName
-    Export:
-      Name: CloudFrontURL
+  BucketName:
+    Description: "S3 Bucket Name"
+    Value: !Ref StaticWebsiteBucket
+
   CloudFrontDistributionID:
-    Description: The CloudFront distribution ID
+    Description: "CloudFront Distribution ID"
     Value: !Ref CloudFrontDistribution
-    Export:
-      Name: CloudFrontDistributionID
+
+  CloudFrontDomainName:
+    Description: "CloudFront Distribution Domain Name"
+    Value: !GetAtt CloudFrontDistribution.DomainName
