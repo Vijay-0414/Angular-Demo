@@ -1,43 +1,59 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Angular Frontend S3 + CloudFront Stack
+Description: S3 Static Website Hosting with CloudFront (Angular App)
 
 Parameters:
   BucketName:
+    Description: Enter the name of the S3 bucket (must be globally unique)
     Type: String
-    Default: my-angular-frontend-unique-2025
-    Description: Globally unique S3 bucket name
+  CNAMEAliases:
+    Description: Comma-separated list of CNAMEs for the CloudFront distribution
+    Type: CommaDelimitedList
+    Default: ""
+  ACMCertificateArn:
+    Description: ARN of the ACM certificate in us-east-1 region
+    Type: String
 
 Resources:
-  FrontendBucket:
+  StaticWebsiteBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Ref BucketName
       WebsiteConfiguration:
         IndexDocument: index.html
         ErrorDocument: index.html
-    DeletionPolicy: Retain
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: ObjectWriter
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
 
-  FrontendBucketPolicy:
+  BucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
-      Bucket: !Ref FrontendBucket
+      Bucket: !Ref StaticWebsiteBucket
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal: "*"
-            Action: 's3:GetObject'
-            Resource: !Sub '${FrontendBucket.Arn}/*'
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub arn:aws:s3:::${StaticWebsiteBucket}/*
 
-  FrontendCloudFront:
+  CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
         Enabled: true
+        DefaultRootObject: index.html
         Origins:
-          - Id: S3Origin
-            DomainName: !GetAtt FrontendBucket.DomainName
-            S3OriginConfig: {}
+          - DomainName: !GetAtt StaticWebsiteBucket.RegionalDomainName
+            Id: S3Origin
+            S3OriginConfig:
+              OriginAccessIdentity: ""
         DefaultCacheBehavior:
           TargetOriginId: S3Origin
           ViewerProtocolPolicy: redirect-to-https
@@ -51,19 +67,31 @@ Resources:
             QueryString: false
             Cookies:
               Forward: none
-        DefaultRootObject: index.html
+          Compress: true
         ViewerCertificate:
-          CloudFrontDefaultCertificate: true
+          AcmCertificateArn: !Ref ACMCertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        PriceClass: PriceClass_100
+        Aliases: !Ref CNAMEAliases
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponsePagePath: /index.html
+            ResponseCode: 200
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponsePagePath: /index.html
+            ResponseCode: 200
+            ErrorCachingMinTTL: 0
 
 Outputs:
-  FrontendBucketName:
-    Description: "S3 Bucket Name"
-    Value: !Ref FrontendBucket
-
-  FrontendCloudFrontId:
-    Description: "CloudFront Distribution ID"
-    Value: !Ref FrontendCloudFront
-
-  FrontendCloudFrontDomain:
-    Description: "CloudFront Domain Name"
-    Value: !GetAtt FrontendCloudFront.DomainName
+  CloudFrontURL:
+    Description: The CloudFront distribution URL
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: CloudFrontURL
+  CloudFrontDistributionID:
+    Description: The CloudFront distribution ID
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: CloudFrontDistributionID
