@@ -1,0 +1,59 @@
+name: Deploy Angular App
+
+# Trigger manually in GitHub Actions UI
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Angular Project
+        run: |
+          # Detect Angular project folder dynamically
+          ANGULAR_PROJECT=$(ls -d */ | grep -E '^.*$' | head -1)
+          npm run build --prod
+          echo "ANGULAR_DIST=dist/$(basename $ANGULAR_PROJECT)" >> $GITHUB_ENV
+
+      - name: Deploy CloudFormation Stack
+        uses: aws-actions/aws-cloudformation-github-deploy@v1
+        with:
+          name: angular-app-stack
+          template: aws-cft.yaml
+          no-fail-on-empty-changeset: true
+
+      - name: Get S3 Bucket & CloudFront Distribution
+        id: get-outputs
+        run: |
+          BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name angular-app-stack \
+            --query "Stacks[0].Outputs[?OutputKey=='AngularAppBucketName'].OutputValue" \
+            --output text)
+          DISTRIBUTION=$(aws cloudformation describe-stacks \
+            --stack-name angular-app-stack \
+            --query "Stacks[0].Outputs[?OutputKey=='AngularAppDistributionId'].OutputValue" \
+            --output text)
+          echo "BUCKET=$BUCKET" >> $GITHUB_ENV
+          echo "DISTRIBUTION=$DISTRIBUTION" >> $GITHUB_ENV
+
+      - name: Upload Angular Build to S3
+        run: aws s3 sync $ANGULAR_DIST s3://$BUCKET --delete
+
+      - name: Invalidate CloudFront Cache
+        run: aws cloudfront create-invalidation --distribution-id $DISTRIBUTION --paths "/*"
