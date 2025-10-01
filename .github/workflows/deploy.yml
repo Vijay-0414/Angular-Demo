@@ -1,59 +1,72 @@
-name: Deploy Angular App
+name: Deploy Angular App to AWS
 
-# Trigger manually in GitHub Actions UI
 on:
-  workflow_dispatch:
+  workflow_dispatch:   # Manual trigger (adhoc from GitHub Actions)
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_REGION: ${{ secrets.AWS_REGION }}
 
     steps:
-      - name: Checkout Repo
+      - name: Checkout source
         uses: actions/checkout@v3
 
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18'
+          node-version: 18
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: npm install
 
-      - name: Build Angular Project
+      - name: Build Angular app
         run: |
-          # Detect Angular project folder dynamically
-          ANGULAR_PROJECT=$(ls -d */ | grep -E '^.*$' | head -1)
+          #sed -i 's|API_URL_PLACEHOLDER|https://ws.screeningplusdemo.com|g' src/environments/environment.prod.ts
           npm run build --prod
-          echo "ANGULAR_DIST=dist/$(basename $ANGULAR_PROJECT)" >> $GITHUB_ENV
+          #git checkout src/environments/environment.prod.ts  # restore original file
+
+      - name: Configure AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}   # ACM cert is in us-east-1 (mandatory for CloudFront)
 
       - name: Deploy CloudFormation Stack
-        uses: aws-actions/aws-cloudformation-github-deploy@v1
-        with:
-          name: angular-app-stack
-          template: aws-cft.yaml
-          no-fail-on-empty-changeset: true
-
-      - name: Get S3 Bucket & CloudFront Distribution
-        id: get-outputs
         run: |
-          BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name angular-app-stack \
-            --query "Stacks[0].Outputs[?OutputKey=='AngularAppBucketName'].OutputValue" \
-            --output text)
-          DISTRIBUTION=$(aws cloudformation describe-stacks \
-            --stack-name angular-app-stack \
-            --query "Stacks[0].Outputs[?OutputKey=='AngularAppDistributionId'].OutputValue" \
-            --output text)
-          echo "BUCKET=$BUCKET" >> $GITHUB_ENV
-          echo "DISTRIBUTION=$DISTRIBUTION" >> $GITHUB_ENV
+          aws cloudformation deploy \
+            --stack-name screening-plus-angular \
+            --template-file aws-cft.yaml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --parameter-overrides \
+              BucketName=screening-plus-angular-demo \
+              CNAMEAliases="screeningplusdemo.com,www.screeningplusdemo.com" \
+              ACMCertificateArn=arn:aws:acm:us-east-1:940146811379:certificate/a9111815-780d-4522-85f1-c1ecdd52238f
 
-      - name: Upload Angular Build to S3
-        run: aws s3 sync $ANGULAR_DIST s3://$BUCKET --delete
+      - name: Upload dist to S3
+        run: aws s3 sync dist/screening-plus s3://screening-plus-angular-demo/ --delete --acl public-read
 
-      - name: Invalidate CloudFront Cache
-        run: aws cloudfront create-invalidation --distribution-id $DISTRIBUTION --paths "/*"
+      - name: Get CloudFront Distribution ID
+        id: cloudfront
+        run: |
+          DIST_ID=$(aws cloudformation describe-stacks \
+            --stack-name screening-plus-angular \
+            --query "Stacks[0].Outputs[?ExportName=='CloudFrontDistributionID'].OutputValue" \
+            --output text)
+          echo "dist_id=$DIST_ID" >> $GITHUB_ENV
+
+      - name: Invalidate CloudFront cache
+        run: aws cloudfront create-invalidation --distribution-id ${{ env.dist_id }} --paths "/*"
+
+      - name: Show Deployment URLs
+        run: |
+          CLOUDFRONT_URL=$(aws cloudformation describe-stacks \
+            --stack-name screening-plus-angular \
+            --query "Stacks[0].Outputs[?ExportName=='CloudFrontURL'].OutputValue" \
+            --output text)
+          echo " Deployment completed successfully!"
+          echo " URLs:"
+          echo " - https://$CLOUDFRONT_URL"
+          echo " - https://screeningplusdemo.com"
+          echo " - https://www.screeningplusdemo.com"
+
