@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       STACK_NAME: screening-plus-angular
-      BUCKET_NAME: screening-plus-angular-demo
+      BUCKET_NAME: screening-plus-angular-demo-7206
       CFN_TEMPLATE: cfn/aws-cft.yaml
       CNAME_ALIASES: screeningplusdemo.com,www.screeningplusdemo.com
       ACM_CERT_ARN: arn:aws:acm:us-east-1:940146811379:certificate/a9111815-780d-4522-85f1-c1ecdd52238f
