@@ -50,11 +50,11 @@ jobs:
         run: npm install -g @angular/cli
 
       - name: Install Angular dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build Angular app
         run: |
-          ng build -- --configuration production
+          CI=true npx ng build --configuration production
 
       - name: Sync build to S3
         run: |
