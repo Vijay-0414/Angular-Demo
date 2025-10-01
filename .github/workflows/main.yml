@@ -1,4 +1,4 @@
-name: Angular Deployment
+name: Angular Frontend Deployment
 
 on:
   workflow_dispatch:
@@ -7,13 +7,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      AWS_REGION: us-east-1
-      STACK_NAME: angular-frontend-stack
-      BUCKET_NAME: my-angular-frontend-unique-2025
+      STACK_NAME: screening-plus-angular
+      BUCKET_NAME: screening-plus-angular-demo
       CFN_TEMPLATE: cfn/aws-cft.yaml
+      CNAME_ALIASES: screeningplusdemo.com,www.screeningplusdemo.com
+      ACM_CERT_ARN: arn:aws:acm:us-east-1:940146811379:certificate/a9111815-780d-4522-85f1-c1ecdd52238f
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v3
 
       - name: Configure AWS credentials
@@ -26,10 +27,12 @@ jobs:
       - name: Check if CloudFormation stack exists
         id: stack-check
         run: |
-          STACK_EXISTS=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].StackName" --output text 2>/dev/null || echo "NO")
+          STACK_EXISTS=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query "Stacks[0].StackName" --output text 2>/dev/null || echo "NO")
           echo "stack_exists=$STACK_EXISTS" >> $GITHUB_OUTPUT
 
-      - name: Create CloudFormation stack if not exists
+      - name: Deploy CloudFormation stack if not exists
         if: steps.stack-check.outputs.stack_exists == 'NO'
         run: |
           echo "Creating CloudFormation stack..."
@@ -37,33 +40,40 @@ jobs:
             --stack-name $STACK_NAME \
             --template-file $CFN_TEMPLATE \
             --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides BucketName=$BUCKET_NAME
-
-      - name: Retrieve CloudFront Distribution ID
-        id: cf-id
-        run: |
-          CF_ID=$(aws cloudformation describe-stacks \
-            --stack-name $STACK_NAME \
-            --query "Stacks[0].Outputs[?OutputKey=='FrontendCloudFrontId'].OutputValue" \
-            --output text)
-          echo "cf_id=$CF_ID" >> $GITHUB_OUTPUT
+            --parameter-overrides BucketName=$BUCKET_NAME CNAMEAliases=$CNAME_ALIASES ACMCertificateArn=$ACM_CERT_ARN
 
       - name: Install Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 20
+          node-version: 18
 
       - name: Install Angular dependencies
         run: npm ci
 
-      - name: Build Angular
-        run: npm run build -- --prod
+      - name: Set production API URL
+        run: |
+          API_URL="https://ws.screeningplusdemo.com"
+          sed -i.bak "s|API_URL_PLACEHOLDER|$API_URL|g" src/environments/environment.prod.ts
+
+      - name: Build Angular app
+        run: |
+          CI=true npm run build -- --configuration production
+          mv src/environments/environment.prod.ts.bak src/environments/environment.prod.ts
 
       - name: Sync build to S3
         run: |
           DIST_FOLDER=$(ls dist/)
-          echo "Syncing ./dist/$DIST_FOLDER to s3://$BUCKET_NAME"
-          aws s3 sync ./dist/$DIST_FOLDER s3://$BUCKET_NAME/ --delete
+          echo "Uploading ./dist/$DIST_FOLDER to S3 bucket $BUCKET_NAME..."
+          aws s3 sync ./dist/$DIST_FOLDER s3://$BUCKET_NAME/ --acl public-read
+
+      - name: Get CloudFront Distribution ID
+        id: cf-id
+        run: |
+          CF_ID=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query "Stacks[0].Outputs[?ExportName=='CloudFrontDistributionID'].OutputValue" \
+            --output text)
+          echo "cf_id=$CF_ID" >> $GITHUB_OUTPUT
 
       - name: Invalidate CloudFront cache
         run: |
@@ -71,3 +81,24 @@ jobs:
           aws cloudfront create-invalidation \
             --distribution-id ${{ steps.cf-id.outputs.cf_id }} \
             --paths "/*"
+
+      - name: Get CloudFront URL
+        id: cf-url
+        run: |
+          CF_URL=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --query "Stacks[0].Outputs[?ExportName=='CloudFrontURL'].OutputValue" \
+            --output text)
+          echo "cf_url=$CF_URL" >> $GITHUB_OUTPUT
+
+      - name: Show deployment URLs
+        run: |
+          IFS=',' read -ra CNAMES <<< "$CNAME_ALIASES"
+          echo "-----------------------------------------------------"
+          echo "🚀 Deployment completed successfully!"
+          echo "🌐 Application URLs:"
+          echo " - https://${{ steps.cf-url.outputs.cf_url }}"
+          for cname in "${CNAMES[@]}"; do
+            echo " - https://$cname"
+          done
+          echo "-----------------------------------------------------"
