@@ -48,11 +48,11 @@ jobs:
           node-version: 18
 
       - name: Install Angular dependencies
-        run: npm ci
+        run: npm install
 
       - name: Build Angular app
         run: |
-          CI=true npm run build -- --configuration production
+          ng build -- --configuration production
 
       - name: Sync build to S3
         run: |
