@@ -6,6 +6,11 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [14, 20]
+        
     env:
       STACK_NAME: screening-plus-angular
       BUCKET_NAME: screening-plus-angular-demo-7206
@@ -42,14 +47,17 @@ jobs:
             --capabilities CAPABILITY_NAMED_IAM \
             --parameter-overrides BucketName=$BUCKET_NAME CNAMEAliases=$CNAME_ALIASES ACMCertificateArn=$ACM_CERT_ARN
 
-      - name: Install Node.js
-        uses: actions/setup-node@v3
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
         with:
-          node-version: 14
+          node-version: ${{ matrix.node-version }}
 
       - name: Install Angular dependencies
         run: npm ci
 
+      - name: Install Angular CLI globally
+        run: npm install -g @angular/cli
+        
       - name: Build Angular app
         run:  ng build
 
