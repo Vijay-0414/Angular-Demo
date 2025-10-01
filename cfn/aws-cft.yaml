@@ -1,10 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Angular frontend S3 + CloudFront stack
+Description: Angular Frontend S3 + CloudFront Stack
 
 Parameters:
   BucketName:
     Type: String
-    Description: Name of the S3 bucket
+    Default: my-angular-frontend-unique-2025
+    Description: Globally unique S3 bucket name
 
 Resources:
   FrontendBucket:
@@ -24,7 +25,7 @@ Resources:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
-            Principal: '*'
+            Principal: "*"
             Action: 's3:GetObject'
             Resource: !Sub '${FrontendBucket.Arn}/*'
 
@@ -53,3 +54,16 @@ Resources:
         DefaultRootObject: index.html
         ViewerCertificate:
           CloudFrontDefaultCertificate: true
+
+Outputs:
+  FrontendBucketName:
+    Description: "S3 Bucket Name"
+    Value: !Ref FrontendBucket
+
+  FrontendCloudFrontId:
+    Description: "CloudFront Distribution ID"
+    Value: !Ref FrontendCloudFront
+
+  FrontendCloudFrontDomain:
+    Description: "CloudFront Domain Name"
+    Value: !GetAtt FrontendCloudFront.DomainName
