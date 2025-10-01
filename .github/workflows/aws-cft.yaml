@@ -1,61 +1,91 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Fully automated Angular App deployment
+Description: Infrastructure for Angular app hosting on S3 + CloudFront with custom domain and SSL
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: S3 bucket name to host Angular app
+  CNAMEAliases:
+    Type: CommaDelimitedList
+    Description: List of CNAME aliases for CloudFront
+  ACMCertificateArn:
+    Type: String
+    Description: ARN of the ACM certificate (must be in us-east-1 for CloudFront)
 
 Resources:
-  AngularAppBucket:
+  # -------------------------------
+  # 1. S3 Bucket for Hosting
+  # -------------------------------
+  AngularHostingBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "${AWS::StackName}-bucket"
-      AccessControl: Private
+      BucketName: !Ref BucketName
       WebsiteConfiguration:
         IndexDocument: index.html
         ErrorDocument: index.html
+      PublicAccessBlockConfiguration:   # 👈 disables Block Public Access
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
 
-  BucketPolicy:
+  AngularHostingBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
-      Bucket: !Ref AngularAppBucket
+      Bucket: !Ref AngularHostingBucket
       PolicyDocument:
-        Version: '2012-10-17'
         Statement:
-          - Sid: AllowCloudFrontAccess
-            Effect: Allow
-            Principal: '*'
-            Action:
-              - s3:GetObject
-            Resource: !Sub "${AngularAppBucket.Arn}/*"
+          - Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "${AngularHostingBucket.Arn}/*"
 
-  AngularAppDistribution:
+  # -------------------------------
+  # 2. CloudFront Distribution
+  # -------------------------------
+  CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
         Enabled: true
         DefaultRootObject: index.html
+        Aliases: !Ref CNAMEAliases
+        ViewerCertificate:
+          AcmCertificateArn: !Ref ACMCertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
         Origins:
-          - Id: S3Origin
-            DomainName: !GetAtt AngularAppBucket.DomainName
-            S3OriginConfig: {}
+          - Id: AngularS3Origin
+            DomainName: !GetAtt AngularHostingBucket.RegionalDomainName
+            CustomOriginConfig:   # 👈 using website endpoint
+              OriginProtocolPolicy: http-only
         DefaultCacheBehavior:
-          TargetOriginId: S3Origin
+          TargetOriginId: AngularS3Origin
           ViewerProtocolPolicy: redirect-to-https
-          AllowedMethods: ["GET", "HEAD", "OPTIONS"]
-          CachedMethods: ["GET", "HEAD"]
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
           ForwardedValues:
             QueryString: false
             Cookies:
               Forward: none
-        ViewerCertificate:
-          CloudFrontDefaultCertificate: true
+        PriceClass: PriceClass_100
+        HttpVersion: http2
 
 Outputs:
-  AngularAppBucketName:
-    Description: "S3 bucket for Angular app"
-    Value: !Ref AngularAppBucket
+  CloudFrontDistributionID:
+    Description: CloudFront Distribution ID
+    Value: !Ref CloudFrontDistribution
     Export:
-      Name: AngularAppBucketName
+      Name: CloudFrontDistributionID
 
-  AngularAppDistributionId:
-    Description: "CloudFront distribution ID"
-    Value: !Ref AngularAppDistribution
+  CloudFrontURL:
+    Description: CloudFront Distribution Domain Name
+    Value: !GetAtt CloudFrontDistribution.DomainName
     Export:
-      Name: AngularAppDistributionId
+      Name: CloudFrontURL
